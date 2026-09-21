@@ -1,0 +1,381 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>赛鸽孵化放行台</title>
+  <style>
+    :root { --bg:#eef1f4; --panel:#fff; --ink:#1f2833; --muted:#697786; --line:#d3dce4; --accent:#2f6d8f; --green:#2e7d4f; --amber:#9a6b1d; --red:#9b3f35; --grey:#5b6b7a; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--bg); color:var(--ink); font-family:Arial,"PingFang SC","Microsoft YaHei",sans-serif; }
+    header { padding:20px 28px; background:#fff; border-bottom:1px solid var(--line); display:flex; justify-content:space-between; gap:16px; align-items:center; }
+    h1 { margin:0; font-size:24px; } h2 { margin:0 0 12px; font-size:17px; } h3 { margin:0; font-size:15px; }
+    main { padding:20px 28px; display:flex; flex-direction:column; gap:18px; }
+    .layout { display:grid; grid-template-columns:360px 1fr; gap:18px; align-items:start; }
+    .col { display:flex; flex-direction:column; gap:18px; }
+    form,.panel,.card { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:15px; }
+    label { display:block; margin:9px 0 4px; color:var(--muted); font-size:12px; }
+    input,select { width:100%; border:1px solid var(--line); border-radius:6px; padding:8px; font:inherit; background:#fff; }
+    button { border:0; border-radius:6px; background:var(--accent); color:#fff; padding:9px 12px; font-weight:700; cursor:pointer; }
+    button.ghost { background:#eef3f6; color:var(--accent); border:1px solid var(--line); }
+    button.green { background:var(--green); } button.red { background:var(--red); } button.small { padding:5px 9px; font-size:12px; }
+    button:disabled { opacity:.45; cursor:not-allowed; }
+    .stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:10px; }
+    .stat { background:#fff; border:1px solid var(--line); border-radius:8px; padding:12px; }
+    .stat b { display:block; font-size:22px; } .stat span { color:var(--muted); font-size:12px; }
+    .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(310px,1fr)); gap:12px; }
+    .meta { color:var(--muted); font-size:12px; } .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+    .pill { display:inline-block; border:1px solid var(--line); border-radius:999px; padding:2px 9px; font-size:12px; }
+    .pill.s-incubating { background:#eaf3f8; color:var(--accent); border-color:#bcd7e6; }
+    .pill.s-cull { background:#fbf1e3; color:var(--amber); border-color:#e6d3ae; }
+    .pill.s-hatched,.pill.s-ready { background:#e8f5ec; color:var(--green); border-color:#bfe0ca; }
+    .pill.s-admitted { background:#e3ecef; color:var(--green); border-color:#b9cfc0; font-weight:700; }
+    .pill.s-invalid { background:#f7e9e7; color:var(--red); border-color:#e4c3be; }
+    .pill.s-abnormal { background:#f7e9e7; color:var(--red); border-color:#e4c3be; }
+    .pill.s-pending { background:#eef1f4; color:var(--grey); border-color:var(--line); }
+    .batch-row { border:1px dashed var(--line); border-radius:8px; padding:10px; margin-bottom:10px; position:relative; }
+    .batch-row .del { position:absolute; top:8px; right:8px; }
+    .two { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+    .egg { border-top:1px solid var(--line); padding:10px 0; } .egg:first-of-type { border-top:0; }
+    #toast { position:fixed; top:16px; left:50%; transform:translateX(-50%); display:none; z-index:9; max-width:90vw; }
+    #toast .inner { background:#fff; border:1px solid var(--red); color:var(--red); border-radius:8px; padding:12px 16px; box-shadow:0 6px 24px rgba(0,0,0,.12); font-size:13px; white-space:pre-line; }
+    #toast.ok .inner { border-color:var(--green); color:var(--green); }
+    .review { font-size:12px; background:#f8fafb; border:1px solid var(--line); border-radius:6px; padding:6px 8px; margin-top:5px; }
+    .archive { font-family:Menlo,Consolas,monospace; font-size:12px; max-height:260px; overflow:auto; }
+    .archive div { padding:3px 0; border-bottom:1px dotted var(--line); }
+    .muted-empty { color:var(--muted); font-size:13px; padding:8px 0; }
+    @media (max-width:960px){ .layout{grid-template-columns:1fr;} header{padding:16px;} main{padding:14px;} }
+  </style>
+</head>
+<body>
+  <div id="toast"><div class="inner"></div></div>
+  <header>
+    <div><h1>赛鸽孵化放行台</h1><div class="meta">窝次绑定亲鸽 · 盘位整批校验 · 照蛋淘汰 · 换人复核 · 足环入场</div></div>
+    <button id="reload">刷新数据</button>
+  </header>
+
+  <main>
+    <div class="panel"><div class="stats" id="stats"></div></div>
+
+    <div class="layout">
+      <div class="col">
+        <form id="batchForm">
+          <h2>整批入孵登记</h2>
+          <div class="meta">同窝共用窝号与亲鸽；盘位/入孵日/照蛋缺一不可，盘位冲突整批拒绝。</div>
+          <div id="batchRows"></div>
+          <div class="row">
+            <button type="button" class="ghost small" id="addRow">+ 加一枚蛋</button>
+            <button type="submit">提交整批</button>
+          </div>
+        </form>
+
+        <form id="pigeonForm">
+          <h2>新建亲鸽档案</h2>
+          <div class="two">
+            <div><label>足环号 *</label><input name="ringNo" required></div>
+            <div><label>鸽主</label><input name="owner"></div>
+          </div>
+          <div class="two">
+            <div><label>父鸽足环号</label><input name="fatherRing"></div>
+            <div><label>母鸽足环号</label><input name="motherRing"></div>
+          </div>
+          <div class="two">
+            <div><label>羽色</label><input name="color"></div>
+            <div><label>棚号</label><input name="loft"></div>
+          </div>
+          <div style="margin-top:10px"><button>保存档案</button></div>
+        </form>
+
+        <form class="panel" id="correctForm">
+          <h2>亲鸽档案 / 血统更正</h2>
+          <div class="meta">更正后：该亲鸽名下未出壳蛋与未入场幼鸽立即失效、释放盘位与出壳名额（已入场不动）。</div>
+          <label>选择亲鸽</label><select name="ringNo" id="correctRing"></select>
+          <div class="two">
+            <div><label>羽色</label><input name="color"></div>
+            <div><label>棚号</label><input name="loft"></div>
+          </div>
+          <div class="two">
+            <div><label>父鸽足环号（血统）</label><input name="fatherRing"></div>
+            <div><label>母鸽足环号（血统）</label><input name="motherRing"></div>
+          </div>
+          <div style="margin-top:10px"><button class="red">提交更正并重算</button></div>
+          <hr style="border:0;border-top:1px solid var(--line);margin:12px 0">
+          <label>疫苗补录（同样触发重算）</label>
+          <div class="two">
+            <select name="vaccineRing" id="vaccineRing"></select>
+            <input name="vaccineName" placeholder="疫苗名称，如 新城疫">
+          </div>
+          <div class="two" style="margin-top:8px">
+            <input name="vaccineDate" type="date">
+            <button type="button" class="ghost" id="addVaccine">补录疫苗</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="col">
+        <section class="panel">
+          <h2>窝次与盘位</h2>
+          <div class="grid" id="clutches"></div>
+        </section>
+
+        <section class="panel">
+          <h2>幼鸽放行（出壳后换人复核，两次正常方可登记足环）</h2>
+          <div class="grid" id="chicks"></div>
+        </section>
+
+        <section class="panel">
+          <h2>失效记录</h2>
+          <div id="invalids"></div>
+        </section>
+
+        <section class="panel">
+          <h2>操作存档（流水，只追加）</h2>
+          <div class="archive" id="archive"></div>
+        </section>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    const $ = s => document.querySelector(s);
+    const esc = v => String(v ?? "").replace(/[&<>"']/g, ch => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[ch]));
+    let state = { pigeons: [], clutches: [], chicks: [], stats: {} };
+    let events = [];
+
+    async function api(path, options = {}) {
+      const opts = options.body ? { ...options, headers: { "Content-Type": "application/json" } } : options;
+      const res = await fetch(path, opts);
+      const data = await res.json();
+      if (!res.ok) {
+        const msg = (data.details && data.details.length ? data.details.join("\n") : data.error) || "请求失败";
+        throw new Error(msg);
+      }
+      return data;
+    }
+    let toastTimer;
+    function toast(msg, ok) {
+      const box = $("#toast");
+      box.querySelector(".inner").textContent = msg;
+      box.className = ok ? "ok" : "";
+      box.style.display = "block";
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => { box.style.display = "none"; }, ok ? 1800 : 5000);
+    }
+    const STATUS_CLASS = { "孵育中":"s-incubating","待淘汰":"s-cull","已出壳":"s-hatched","失效":"s-invalid","待放行":"s-pending","可登记":"s-ready","已入场":"s-admitted","复核异常":"s-abnormal" };
+    const pill = s => `<span class="pill ${STATUS_CLASS[s] || ""}">${esc(s)}</span>`;
+
+    // ---------- 整批入孵表单 ----------
+    function batchRowHtml() {
+      return `<div class="batch-row">
+        <button type="button" class="ghost small del">删</button>
+        <div class="two">
+          <div><label>窝号 *</label><input class="f-clutch"></div>
+          <div><label>盘位 *</label><input class="f-tray" placeholder="如 A-07"></div>
+        </div>
+        <div class="two">
+          <div><label>父鸽足环号 *</label><input class="f-father" list="ringList"></div>
+          <div><label>母鸽足环号 *</label><input class="f-mother" list="ringList"></div>
+        </div>
+        <div class="two">
+          <div><label>入孵日 *</label><input class="f-date" type="date"></div>
+          <div><label>第五日照蛋 *</label>
+            <select class="f-day5"><option value="">请选择</option><option>受精</option><option>未受精</option></select>
+          </div>
+        </div>
+        <label>第十日照蛋（可后补）</label>
+        <select class="f-day10"><option value="">入孵时未照</option><option>发育</option><option>停育</option></select>
+      </div>`;
+    }
+    function addBatchRow() {
+      const wrap = document.createElement("div");
+      wrap.innerHTML = batchRowHtml();
+      const row = wrap.firstElementChild;
+      row.querySelector(".del").onclick = () => row.remove();
+      $("#batchRows").appendChild(row);
+    }
+
+    // ---------- 渲染 ----------
+    function renderStats() {
+      const items = [
+        ["窝次", state.stats.clutches], ["占用盘位", state.stats.traysOccupied],
+        ["待淘汰蛋", state.stats.cullPending], ["待出壳名额", state.stats.hatchReady],
+        ["待复核幼鸽", state.stats.chicksPending], ["可登记幼鸽", state.stats.chicksReady],
+        ["已入场", state.stats.admitted], ["失效蛋/雏", (state.stats.invalidEggs||0) + (state.stats.invalidChicks||0)]
+      ];
+      $("#stats").innerHTML = items.map(([k, v]) => `<div class="stat"><b>${v ?? 0}</b><span>${k}</span></div>`).join("");
+    }
+
+    function renderClutches() {
+      const ringOpts = state.pigeons.map(p => `<option value="${esc(p.ringNo)}">`).join("");
+      $("#clutches").innerHTML = `<datalist id="ringList">${ringOpts}</datalist>` + (state.clutches.length ? "" : `<div class="muted-empty">暂无窝次，先在左侧整批入孵。</div>`);
+      if (!state.clutches.length) return;
+      $("#clutches").innerHTML = state.clutches.map(c => `
+        <article class="card">
+          <div class="row" style="justify-content:space-between">
+            <h3>窝号 ${esc(c.clutchNo)}</h3>${pill("窝次")}
+          </div>
+          <div class="meta">父：${esc(c.fatherRing)} ｜ 母：${esc(c.motherRing)}</div>
+          <div class="meta">建档：${esc(c.createdAt)}</div>
+          ${c.eggs.map(e => `
+            <div class="egg">
+              <div class="row" style="justify-content:space-between"><b>${esc(e.eggId)}</b>${pill(e.status)}</div>
+              <div class="meta">盘位 ${esc(e.trayNo)} ｜ 入孵 ${esc(e.incubationDate)}${e.hatchDate ? " ｜ 出壳 " + esc(e.hatchDate) : ""}</div>
+              <div class="meta">照蛋：第5日 ${esc(e.day5 || "未照")} ｜ 第10日 ${esc(e.day10 || "未照")}${e.invalidateReason ? " ｜ 失效原因：" + esc(e.invalidateReason) : ""}</div>
+              ${e.status === "孵育中" && e.day5 === "受精" && !e.day10 ? `
+                <div class="row" style="margin-top:7px">
+                  <select id="r-${esc(e.eggId)}"><option>发育</option><option>停育</option></select>
+                  <button class="small ghost" data-candle="${esc(e.eggId)}">补第10日照蛋</button>
+                </div>` : ""}
+              ${e.eligible ? `<div style="margin-top:7px"><button class="small green" data-hatch="${esc(e.eggId)}">确认出壳（占名额）</button></div>` : ""}
+              ${e.chickId ? `<div class="meta" style="margin-top:5px">→ 幼鸽 ${esc(e.chickId)}</div>` : ""}
+            </div>`).join("")}
+        </article>`).join("");
+    }
+
+    function renderChicks() {
+      const box = $("#chicks");
+      const active = state.chicks.filter(c => c.status !== "失效");
+      if (!active.length) { box.innerHTML = `<div class="muted-empty">暂无出壳幼鸽。待淘汰蛋不占出壳名额，只有两日照蛋正常的蛋才能确认出壳。</div>`; return; }
+      box.innerHTML = active.map(c => `
+        <article class="card">
+          <div class="row" style="justify-content:space-between"><h3>${esc(c.chickId)}</h3>${pill(c.status)}</div>
+          <div class="meta">来自 ${esc(c.eggId)}（窝 ${esc(c.clutchNo)}）｜ 出壳 ${esc(c.hatchDate)}</div>
+          <div class="meta">父：${esc(c.fatherRing)} ｜ 母：${esc(c.motherRing)}</div>
+          <div class="meta">正常复核：${c.normalCount}/2${c.ringNo ? " ｜ 足环：" + esc(c.ringNo) : ""}</div>
+          ${c.reviews.map(r => `<div class="review">申请 ${esc(r.applyNo)}：${esc(r.reviewer)} 判「${esc(r.result)}」于 ${esc(r.date)}</div>`).join("")}
+          ${c.status === "待放行" ? `
+            <label>复核申请号（重复申请沿用首次结果）</label><input id="a-${esc(c.chickId)}" placeholder="如 REQ-${esc(c.chickId)}-1">
+            <div class="two">
+              <div><label>复核人（第二次须换人）</label><input id="w-${esc(c.chickId)}"></div>
+              <div><label>结论</label><select id="v-${esc(c.chickId)}"><option>正常</option><option>异常</option></select></div>
+            </div>
+            <div style="margin-top:8px"><button class="small" data-review="${esc(c.chickId)}">提交复核</button></div>` : ""}
+          ${c.status === "可登记" ? `
+            <label>登记足环号</label>
+            <div class="row"><input id="ring-${esc(c.chickId)}" placeholder="如 CHN-2026-100"><button class="small green" data-admit="${esc(c.chickId)}">登记足环入场</button></div>` : ""}
+          ${c.status === "复核异常" ? `<div class="meta" style="color:var(--red)">复核异常，锁定不得入场。</div>` : ""}
+        </article>`).join("");
+    }
+
+    function renderInvalids() {
+      const eggs = state.clutches.flatMap(c => c.eggs).filter(e => e.status === "失效");
+      const chicks = state.chicks.filter(c => c.status === "失效");
+      if (!eggs.length && !chicks.length) { $("#invalids").innerHTML = `<div class="muted-empty">暂无失效记录。</div>`; return; }
+      $("#invalids").innerHTML = `
+        ${eggs.map(e => `<div class="review">蛋 ${esc(e.eggId)}（窝 ${esc(e.clutchNo)}，原盘位 ${esc(e.trayNo)}）：${esc(e.invalidateReason)} @ ${esc(e.invalidatedAt)}，盘位与名额已释放</div>`).join("")}
+        ${chicks.map(c => `<div class="review">幼鸽 ${esc(c.chickId)}（窝 ${esc(c.clutchNo)}）：${esc(c.invalidateReason)} @ ${esc(c.invalidatedAt)}，复核结论作废，需重新孵化</div>`).join("")}`;
+    }
+
+    function renderArchive() {
+      const box = $("#archive");
+      if (!events.length) { box.innerHTML = `<div class="muted-empty">暂无操作流水。</div>`; return; }
+      box.innerHTML = events.slice().reverse().slice(0, 80).map(e =>
+        `<div>${esc(e.at)} <b>${esc(e.type)}</b> ${esc(e.summary || "")}</div>`).join("");
+    }
+
+    function renderPigeonSelects() {
+      const opts = state.pigeons.map(p => `<option value="${esc(p.ringNo)}">${esc(p.ringNo)}（${esc(p.owner)} / ${esc(p.loft)}）</option>`).join("");
+      $("#correctRing").innerHTML = opts || `<option value="">无档案</option>`;
+      $("#vaccineRing").innerHTML = opts || `<option value="">无档案</option>`;
+      const selected = state.pigeons.find(p => p.ringNo === $("#correctRing").value) || state.pigeons[0];
+      if (selected) {
+        const f = $("#correctForm");
+        f.color.value = selected.color === "待鉴定" ? "" : selected.color;
+        f.loft.value = selected.loft || "";
+        f.fatherRing.value = selected.fatherRing || "";
+        f.motherRing.value = selected.motherRing || "";
+      }
+    }
+
+    async function load() {
+      state = await api("/api/state");
+      events = await api("/api/events");
+      renderStats(); renderClutches(); renderChicks(); renderInvalids(); renderArchive(); renderPigeonSelects();
+    }
+
+    // ---------- 事件 ----------
+    $("#addRow").onclick = addBatchRow;
+    $("#reload").onclick = () => load().then(() => toast("已刷新", true)).catch(e => toast(e.message));
+
+    $("#batchForm").onsubmit = async ev => {
+      ev.preventDefault();
+      const rows = [...document.querySelectorAll(".batch-row")].map(r => ({
+        clutchNo: r.querySelector(".f-clutch").value,
+        trayNo: r.querySelector(".f-tray").value,
+        fatherRing: r.querySelector(".f-father").value,
+        motherRing: r.querySelector(".f-mother").value,
+        incubationDate: r.querySelector(".f-date").value,
+        candleDay5: r.querySelector(".f-day5").value,
+        candleDay10: r.querySelector(".f-day10").value
+      }));
+      try {
+        await api("/api/incubations", { method: "POST", body: JSON.stringify({ rows }) });
+        document.querySelectorAll(".batch-row").forEach(r => r.remove());
+        addBatchRow();
+        toast("整批入孵成功", true);
+        await load();
+      } catch (e) { toast("整批拒绝：\n" + e.message); }
+    };
+
+    $("#pigeonForm").onsubmit = async ev => {
+      ev.preventDefault();
+      const f = ev.target;
+      try {
+        await api("/api/pigeons", { method: "POST", body: JSON.stringify(Object.fromEntries(new FormData(f).entries())) });
+        f.reset(); toast("档案已保存", true); await load();
+      } catch (e) { toast(e.message); }
+    };
+
+    $("#correctForm").onsubmit = async ev => {
+      ev.preventDefault();
+      const f = ev.target;
+      const ringNo = $("#correctRing").value;
+      const patch = { color: f.color.value, loft: f.loft.value, fatherRing: f.fatherRing.value, motherRing: f.motherRing.value };
+      try {
+        const r = await api("/api/pigeons/" + encodeURIComponent(ringNo) + "/corrections", { method: "POST", body: JSON.stringify(patch) });
+        toast(`更正完成：失效蛋 ${r.invalidatedEggs.length} 枚、幼鸽 ${r.invalidatedChicks.length} 只`, true);
+        await load();
+      } catch (e) { toast(e.message); }
+    };
+
+    $("#addVaccine").onclick = async () => {
+      const f = $("#correctForm");
+      try {
+        const r = await api("/api/pigeons/" + encodeURIComponent(f.vaccineRing.value) + "/vaccines",
+          { method: "POST", body: JSON.stringify({ name: f.vaccineName.value, date: f.vaccineDate.value }) });
+        toast(`疫苗已补录：失效蛋 ${r.invalidatedEggs.length} 枚、幼鸽 ${r.invalidatedChicks.length} 只`, true);
+        f.vaccineName.value = ""; f.vaccineDate.value = "";
+        await load();
+      } catch (e) { toast(e.message); }
+    };
+
+    document.addEventListener("click", async ev => {
+      const btn = ev.target.closest("button[data-candle],button[data-hatch],button[data-review],button[data-admit]");
+      if (!btn) return;
+      try {
+        if (btn.dataset.candle) {
+          const result = $("#r-" + btn.dataset.candle).value;
+          await api("/api/eggs/" + encodeURIComponent(btn.dataset.candle) + "/candles",
+            { method: "POST", body: JSON.stringify({ day: 10, result }) });
+        }
+        if (btn.dataset.hatch) await api("/api/eggs/" + encodeURIComponent(btn.dataset.hatch) + "/hatch", { method: "POST", body: "{}" });
+        if (btn.dataset.review) {
+          const id = btn.dataset.review;
+          await api("/api/chicks/" + encodeURIComponent(id) + "/reviews",
+            { method: "POST", body: JSON.stringify({ applyNo: $("#a-" + id).value, reviewer: $("#w-" + id).value, result: $("#v-" + id).value }) });
+        }
+        if (btn.dataset.admit) {
+          const id = btn.dataset.admit;
+          await api("/api/chicks/" + encodeURIComponent(id) + "/ring",
+            { method: "POST", body: JSON.stringify({ ringNo: $("#ring-" + id).value }) });
+        }
+        toast("操作成功", true);
+        await load();
+      } catch (e) { toast(e.message); }
+    });
+
+    addBatchRow();
+    load().catch(e => toast(e.message));
+  </script>
+</body>
+</html>
