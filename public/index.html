@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>赛鸽孵化放行台</title>
+  <style>
+    :root { --bg:#eff2f5; --panel:#fff; --ink:#1f2833; --muted:#697786; --line:#d3dce4; --accent:#315f83; --red:#9b3f35; --green:#2f6b4f; --amber:#8a6d1d; }
+    * { box-sizing:border-box; } body { margin:0; background:var(--bg); color:var(--ink); font-family:Arial,"PingFang SC",sans-serif; }
+    header { padding:22px 28px; background:#fff; border-bottom:1px solid var(--line); display:flex; justify-content:space-between; gap:16px; align-items:center; }
+    h1 { margin:0; font-size:26px; } main { display:grid; grid-template-columns:400px 1fr; gap:22px; padding:22px 28px; align-items:start; }
+    form,.panel,.card { background:#fff; border:1px solid var(--line); border-radius:8px; padding:16px; } h2 { margin:0 0 12px; font-size:18px; } h3 { margin:0; }
+    label { display:block; margin:10px 0 5px; color:var(--muted); font-size:13px; } input,select,textarea { width:100%; border:1px solid var(--line); border-radius:6px; padding:9px; font:inherit; }
+    button { border:0; border-radius:6px; background:var(--accent); color:#fff; padding:10px 13px; font-weight:700; cursor:pointer; }
+    button.ghost { background:#fff; color:var(--accent); border:1px solid var(--accent); }
+    .toolbar { display:grid; grid-template-columns:1fr auto; gap:10px; margin-bottom:14px; }
+    .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(300px,1fr)); gap:12px; }
+    .card { display:grid; gap:8px; align-content:start; } .meta { color:var(--muted); font-size:13px; }
+    .pill { display:inline-block; border:1px solid var(--line); border-radius:999px; padding:3px 8px; font-size:12px; }
+    .pill.ok { color:var(--green); border-color:var(--green); } .pill.warn { color:var(--amber); border-color:var(--amber); } .pill.bad { color:var(--red); border-color:var(--red); }
+    .section { margin-top:14px; } .relation { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-bottom:14px; }
+    .small { background:#f8fafb; border:1px solid var(--line); border-radius:8px; padding:10px; }
+    .row { display:grid; grid-template-columns:1fr 1fr; gap:8px; } .row3 { display:grid; grid-template-columns:1fr 1fr auto; gap:8px; align-items:end; }
+    table { width:100%; border-collapse:collapse; font-size:13px; } td,th { border-top:1px solid var(--line); padding:6px 4px; text-align:left; vertical-align:top; }
+    .side { display:grid; gap:22px; } #toast { position:fixed; right:18px; bottom:18px; background:var(--ink); color:#fff; padding:10px 14px; border-radius:8px; display:none; max-width:60vw; }
+    @media (max-width:900px){ header{display:block;padding:18px 16px;} main{grid-template-columns:1fr;padding:16px;} .relation{grid-template-columns:1fr;} }
+  </style>
+</head>
+<body>
+  <header><div><h1>赛鸽孵化放行台</h1><div class="meta">窝次 · 盘位 · 照蛋 · 出壳复核 · 足环放行（规则 / 存档 / 页面分离，刷新后状态一致）</div></div><button id="reload">刷新</button></header>
+  <main>
+    <div class="side">
+      <form id="pigeonForm">
+        <h2>创建鸽只档案</h2>
+        <label>足环号</label><input name="ringNo" required>
+        <label>鸽主</label><input name="owner" required>
+        <div class="row"><div><label>父鸽足环号</label><input name="fatherRing"></div><div><label>母鸽足环号</label><input name="motherRing"></div></div>
+        <label>羽色</label><input name="color" required>
+        <label>出生棚号</label><input name="loft" required>
+        <button>保存档案</button>
+      </form>
+      <form id="clutchForm">
+        <h2>新建窝次（整批校验）</h2>
+        <label>唯一窝号</label><input name="clutchNo" required placeholder="如 CL-2026-09-01">
+        <div class="row"><div><label>父鸽足环号</label><input name="fatherRing" required></div><div><label>母鸽足环号</label><input name="motherRing" required></div></div>
+        <label>蛋清单（每行：盘位,入孵日,第五日照蛋,第十日照蛋可空）</label>
+        <textarea name="eggs" rows="3" required placeholder="A-01,2026-09-01,fertile,developing&#10;A-02,2026-09-01,infertile"></textarea>
+        <div class="meta">照蛋取值：第五日 fertile/infertile，第十日 developing/stopped；盘位、入孵日、照蛋缺一不可，同盘位重复占用整批拒绝。</div>
+        <button>提交整批</button>
+      </form>
+    </div>
+    <section>
+      <div class="toolbar"><input id="search" placeholder="输入足环号查询血统"><button id="searchBtn" type="button">查询</button></div>
+      <div class="panel" id="detail"></div>
+      <h2 class="section">窝次与盘位</h2>
+      <div class="grid" id="clutches"></div>
+      <h2 class="section">待放行幼鸽</h2>
+      <div class="grid" id="squabs"></div>
+      <h2 class="section">鸽只档案</h2>
+      <div class="grid" id="cards"></div>
+    </section>
+  </main>
+  <div id="toast"></div>
+  <script>
+    const $ = sel => document.querySelector(sel);
+    let state = { pigeons: [], clutches: [], squabs: [], releases: [] };
+    const EGG_STATUS = { incubating: ["孵化中", "ok"], pending_cull: ["待淘汰", "warn"], hatched: ["已出壳", "ok"], culled: ["已淘汰", "bad"] };
+    const SQUAB_STATUS = { pending_release: ["待放行", "warn"], released: ["已放行", "ok"] };
+    const CANDLING = { fertile: "受精", infertile: "未受精", developing: "发育正常", stopped: "停育" };
+    function toast(msg) { const el = $("#toast"); el.textContent = msg; el.style.display = "block"; setTimeout(() => el.style.display = "none", 3200); }
+    async function api(path, options) {
+      const res = await fetch(path, options && options.body ? { ...options, headers: { "Content-Type": "application/json" } } : options);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || data.error || "请求失败");
+      return data;
+    }
+    async function run(fn) { try { await fn(); await load(); } catch (error) { toast(error.message); } }
+    function pill(pair) { return '<span class="pill ' + pair[1] + '">' + pair[0] + '</span>'; }
+
+    function renderPigeons() {
+      $("#cards").innerHTML = state.pigeons.map(p => '<article class="card"><h3>' + p.ringNo + '</h3><span class="pill">' + p.owner + '</span><div class="meta">' + (p.color || "未定羽色") + ' · ' + p.loft + '</div><div>父：' + (p.fatherRing || "未登记") + '</div><div>母：' + (p.motherRing || "未登记") + '</div><div class="meta">疫苗：' + (p.vaccines.map(v => v.name).join("、") || "暂无") + '</div>'
+        + '<label>录入转让</label><div class="row3"><input data-to="' + p.ringNo + '" placeholder="新归属人"><span></span><button data-transfer="' + p.ringNo + '" type="button">保存</button></div>'
+        + '<label>归巢成绩</label><div class="row3"><input data-race="' + p.ringNo + '" placeholder="赛事/距离/名次"><span></span><button data-score="' + p.ringNo + '" type="button">保存</button></div>'
+        + '<label>补录疫苗（触发失效重算）</label><div class="row3"><input data-vac="' + p.ringNo + '" placeholder="疫苗名称"><span></span><button data-vaccine="' + p.ringNo + '" type="button">保存</button></div>'
+        + '<label>血统/归属更正（触发失效重算）</label><div class="row"><input data-cf="' + p.ringNo + '" placeholder="更正父鸽环号" value="' + (p.fatherRing || "") + '"><input data-cm="' + p.ringNo + '" placeholder="更正母鸽环号" value="' + (p.motherRing || "") + '"></div><button class="ghost" data-correct="' + p.ringNo + '" type="button">提交更正</button></article>').join("");
+      document.querySelectorAll("[data-transfer]").forEach(btn => btn.onclick = () => run(async () => {
+        const ringNo = btn.dataset.transfer;
+        await api('/api/pigeons/' + encodeURIComponent(ringNo) + '/transfers', { method: 'POST', body: JSON.stringify({ to: document.querySelector('[data-to="' + ringNo + '"]').value }) });
+      }));
+      document.querySelectorAll("[data-score]").forEach(btn => btn.onclick = () => run(async () => {
+        const ringNo = btn.dataset.score; const raw = document.querySelector('[data-race="' + ringNo + '"]').value.split("/");
+        await api('/api/pigeons/' + encodeURIComponent(ringNo) + '/races', { method: 'POST', body: JSON.stringify({ event: raw[0] || "未命名赛事", distance: Number(raw[1] || 0), rank: Number(raw[2] || 0) }) });
+      }));
+      document.querySelectorAll("[data-vaccine]").forEach(btn => btn.onclick = () => run(async () => {
+        const ringNo = btn.dataset.vaccine;
+        await api('/api/pigeons/' + encodeURIComponent(ringNo) + '/vaccines', { method: 'POST', body: JSON.stringify({ name: document.querySelector('[data-vac="' + ringNo + '"]').value }) });
+      }));
+      document.querySelectorAll("[data-correct]").forEach(btn => btn.onclick = () => run(async () => {
+        const ringNo = btn.dataset.correct;
+        const result = await api('/api/pigeons/' + encodeURIComponent(ringNo) + '/corrections', { method: 'POST', body: JSON.stringify({ fatherRing: document.querySelector('[data-cf="' + ringNo + '"]').value, motherRing: document.querySelector('[data-cm="' + ringNo + '"]').value }) });
+        toast('已更正，失效 ' + result.invalidated + ' 项，重算蛋 ' + result.recalculated.eggs + ' 枚、幼鸽 ' + result.recalculated.squabs + ' 只');
+      }));
+    }
+
+    function renderClutches() {
+      $("#clutches").innerHTML = state.clutches.map(c => '<article class="card"><h3>窝 ' + c.clutchNo + '</h3><div class="meta">父 ' + c.fatherRing + ' × 母 ' + c.motherRing + ' · 入孵 ' + c.createdAt + '</div>'
+        + '<table><tr><th>蛋</th><th>盘位</th><th>入孵日</th><th>照蛋</th><th>状态</th><th>操作</th></tr>'
+        + c.eggs.map(e => '<tr><td>' + e.eggId + '</td><td>' + e.traySlot + '</td><td>' + e.incubationStart + '</td><td>D5 ' + (CANDLING[e.candling.day5] || "—") + '<br>D10 ' + (CANDLING[e.candling.day10] || "—") + '</td><td>' + pill(EGG_STATUS[e.status]) + (e.recalculatedAt ? '<br><span class="meta">重算于' + e.recalculatedAt + '</span>' : '') + '</td><td>'
+          + (e.status === 'incubating' || e.status === 'pending_cull'
+            ? '<select data-cd5="' + e.eggId + '"><option value="">D5不变</option><option value="fertile">受精</option><option value="infertile">未受精</option></select>'
+            + '<select data-cd10="' + e.eggId + '"><option value="">D10不变</option><option value="developing">发育正常</option><option value="stopped">停育</option></select>'
+            + '<button data-candling="' + c.clutchNo + '|' + e.eggId + '" type="button">照蛋</button> ' : '')
+          + (e.status === 'incubating' ? '<input data-op="' + e.eggId + '" placeholder="操作人"><button data-hatch="' + c.clutchNo + '|' + e.eggId + '" type="button">出壳</button> ' : '')
+          + (e.status === 'pending_cull' ? '<button data-cull="' + c.clutchNo + '|' + e.eggId + '" type="button">确认淘汰</button>' : '')
+          + '</td></tr>').join("") + '</table></article>').join("") || '<div class="panel meta">暂无窝次</div>';
+      document.querySelectorAll("[data-candling]").forEach(btn => btn.onclick = () => run(async () => {
+        const [clutchNo, eggId] = btn.dataset.candling.split("|");
+        await api('/api/clutches/' + encodeURIComponent(clutchNo) + '/eggs/' + encodeURIComponent(eggId) + '/candling', { method: 'POST', body: JSON.stringify({ day5: document.querySelector('[data-cd5="' + eggId + '"]').value || undefined, day10: document.querySelector('[data-cd10="' + eggId + '"]').value || undefined }) });
+      }));
+      document.querySelectorAll("[data-hatch]").forEach(btn => btn.onclick = () => run(async () => {
+        const [clutchNo, eggId] = btn.dataset.hatch.split("|");
+        await api('/api/clutches/' + encodeURIComponent(clutchNo) + '/eggs/' + encodeURIComponent(eggId) + '/hatch', { method: 'POST', body: JSON.stringify({ operator: document.querySelector('[data-op="' + eggId + '"]').value }) });
+      }));
+      document.querySelectorAll("[data-cull]").forEach(btn => btn.onclick = () => run(async () => {
+        const [clutchNo, eggId] = btn.dataset.cull.split("|");
+        await api('/api/clutches/' + encodeURIComponent(clutchNo) + '/eggs/' + encodeURIComponent(eggId) + '/cull', { method: 'POST', body: '{}' });
+      }));
+    }
+
+    function renderSquabs() {
+      $("#squabs").innerHTML = state.squabs.map(s => {
+        const normals = s.reviews.filter(r => r.result === "normal").length;
+        const release = state.releases.find(r => r.squabId === s.squabId);
+        return '<article class="card"><h3>' + s.squabId + '</h3>' + pill(SQUAB_STATUS[s.status])
+          + '<div class="meta">窝 ' + s.clutchNo + ' · 出壳 ' + s.hatchedAt + ' · 记录人 ' + s.recordedBy + (s.recalculatedAt ? ' · 重算于' + s.recalculatedAt : '') + '</div>'
+          + '<div>正常复核 ' + normals + '/2：' + (s.reviews.map(r => r.reviewer + '(' + (r.result === "normal" ? "正常" : "异常") + ')').join("、") || "暂无") + '</div>'
+          + (s.status === 'pending_release'
+            ? '<div class="row"><input data-rv="' + s.squabId + '" placeholder="复核人（须换人）"><select data-rr="' + s.squabId + '"><option value="normal">正常</option><option value="abnormal">异常</option></select></div><button data-review="' + s.squabId + '" type="button">提交复核</button>'
+            + '<label>足环号</label><div class="row3"><input data-ring="' + s.squabId + '" placeholder="登记足环入场"><span></span><button data-release="' + s.squabId + '" type="button">放行</button></div>'
+            : '<div class="meta">足环 ' + s.ringNo + ' · 放行于 ' + (release ? release.date : "") + '（重复申请沿用首次结果）</div>')
+          + '</article>';
+      }).join("") || '<div class="panel meta">暂无幼鸽</div>';
+      document.querySelectorAll("[data-review]").forEach(btn => btn.onclick = () => run(async () => {
+        const id = btn.dataset.review;
+        await api('/api/squabs/' + encodeURIComponent(id) + '/reviews', { method: 'POST', body: JSON.stringify({ reviewer: document.querySelector('[data-rv="' + id + '"]').value, result: document.querySelector('[data-rr="' + id + '"]').value }) });
+      }));
+      document.querySelectorAll("[data-release]").forEach(btn => btn.onclick = () => run(async () => {
+        const id = btn.dataset.release;
+        const result = await api('/api/squabs/' + encodeURIComponent(id) + '/release', { method: 'POST', body: JSON.stringify({ ringNo: document.querySelector('[data-ring="' + id + '"]').value }) });
+        if (result.reused) toast('重复申请，沿用首次放行结果：' + result.release.ringNo);
+      }));
+    }
+
+    function renderRelation(data) {
+      if (!data) { $("#detail").innerHTML = '<h2>血统查询</h2><p class="meta">输入足环号查看父母、子代、转让和成绩。</p>'; return; }
+      const p = data.pigeon;
+      $("#detail").innerHTML = '<h2>' + p.ringNo + ' 血统档案</h2><div class="relation"><div class="small"><b>父鸽</b><br>' + (data.father?.ringNo || p.fatherRing || "未登记") + '</div><div class="small"><b>本鸽</b><br>' + p.owner + ' · ' + (p.color || "未定羽色") + '</div><div class="small"><b>母鸽</b><br>' + (data.mother?.ringNo || p.motherRing || "未登记") + '</div></div><div><b>子代</b> ' + (data.children.map(c => c.ringNo).join("、") || "暂无") + '</div><div class="meta">转让：' + (p.transfers.map(t => t.from + "→" + t.to).join(" / ") || "暂无") + '</div><div class="meta">归巢：' + (p.races.map(r => r.event + " 第" + r.rank + "名").join(" / ") || "暂无") + '</div>';
+    }
+
+    async function load() {
+      state = await api("/api/state");
+      renderPigeons(); renderClutches(); renderSquabs(); renderRelation(null);
+    }
+    $("#searchBtn").onclick = () => run(async () => renderRelation(await api('/api/pigeons/' + encodeURIComponent($("#search").value) + '/relation')));
+    $("#reload").onclick = load;
+    $("#pigeonForm").onsubmit = event => {
+      event.preventDefault();
+      run(async () => { await api("/api/pigeons", { method: "POST", body: JSON.stringify(Object.fromEntries(new FormData(event.target).entries())) }); event.target.reset(); });
+    };
+    $("#clutchForm").onsubmit = event => {
+      event.preventDefault();
+      run(async () => {
+        const form = Object.fromEntries(new FormData(event.target).entries());
+        const eggs = form.eggs.split("\n").map(line => line.trim()).filter(Boolean).map(line => {
+          const [traySlot, incubationStart, day5, day10] = line.split(",").map(s => (s || "").trim());
+          return { traySlot, incubationStart, candling: { day5: day5 || null, day10: day10 || null } };
+        });
+        await api("/api/clutches", { method: "POST", body: JSON.stringify({ clutchNo: form.clutchNo, fatherRing: form.fatherRing, motherRing: form.motherRing, eggs }) });
+        event.target.reset();
+      });
+    };
+    load();
+  </script>
+</body>
+</html>
